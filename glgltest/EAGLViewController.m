@@ -73,11 +73,14 @@ enum {
     [self setupGL];
     
     //set texture using adjust image
-    NSURL *url = [[NSBundle mainBundle] URLForResource:@"buffer_640x480_2560_1228808" withExtension:nil];
-    UIImage *image = [self imageWithImageBufferContentsOfURL:url];
+//    NSURL *url = [[NSBundle mainBundle] URLForResource:@"buffer_640x480_2560_1228808" withExtension:nil];
+//    UIImage *image = [self imageWithImageBufferContentsOfURL:url];
+//    self.imageView.image = image;
+//    [self loadTextureWithPixelBuffer:(CVPixelBufferRef)[[NSData dataWithContentsOfURL:url] bytes]];
+    
+    UIImage *image = [UIImage imageNamed:@"noise_gazou.bmp"];
     self.imageView.image = image;
-    [self loadTextureWithPixelBuffer:(CVPixelBufferRef)[[NSData dataWithContentsOfURL:url] bytes]];
-//    [self loadTextureWithImage:image];
+    [self loadTextureWithImage:image];
     
 }
 
@@ -134,6 +137,7 @@ enum {
     [super viewWillDisappear:animated];
 }
 
+
 #pragma mark -
 - (UIImage*)imageWithImageBufferContentsOfURL:(NSURL*)url
 {
@@ -148,11 +152,13 @@ enum {
     size_t width = 640;
     size_t height = 480;
     // デバイス依存のRGB色空間を作成する
-    static CGColorSpaceRef colorSpace = NULL; if (colorSpace == NULL) {
+    static CGColorSpaceRef colorSpace = NULL;
+    if (colorSpace == NULL) {
         colorSpace = CGColorSpaceCreateDeviceRGB(); if (colorSpace == NULL) {
             // エラーを適切に処理する
             return nil;
-        } }
+        } 
+    }
     // ピクセルバッファのベースアドレスを取得する
     void *baseAddress = imageBuffer;
     // ピクセルバッファの連続したプレーンのデータサイズを取得する
@@ -170,7 +176,7 @@ enum {
     UIImage *image = [UIImage imageWithCGImage:cgImage scale:1.0 orientation:UIImageOrientationRight];
     CGImageRelease(cgImage);
     NSAssert(image, @"image not found");
-    
+    NSLog(@"image size:%@", NSStringFromCGSize(image.size));
     return image;
 }
 @end
@@ -208,7 +214,8 @@ enum {
 {
     EAGLContext *aContext = [[EAGLContext alloc] initWithAPI:kEAGLRenderingAPIOpenGLES2];
     NSAssert(aContext, @"Failed to create ES context");
-
+    UIImage *image=[UIImage new];
+    UIImage *image2 = [[UIImage alloc] initWithCGImage:image.CGImage scale:2.0 orientation:UIImageOrientationUp];
     self.context = aContext;
     [aContext release];
     
@@ -218,12 +225,20 @@ enum {
     [self createTextuerUsingSize:glView.framebufferSize];
     [self createTextuerUsingSize:glView.framebufferSize];
     
+//    GLfloat const verticies_[] = {
+//        //x  ,   y  ,  z  ,  s  ,  t 
+//        -1.0f, -1.0f, 0.0f, 1.0f, 1.0f,
+//        -1.0f,  1.0f, 0.0f, 0.0f, 1.0f,
+//        1.0f,  1.0f, 0.0f, 0.0f, 0.0f,
+//        1.0f, -1.0f, 0.0f, 1.0f, 0.0f
+//    };
+
     GLfloat const verticies_[] = {
         //x  ,   y  ,  z  ,  s  ,  t 
-        -1.0f, -1.0f, 0.0f, 1.0f, 1.0f,
-        -1.0f,  1.0f, 0.0f, 0.0f, 1.0f,
-        1.0f,  1.0f, 0.0f, 0.0f, 0.0f,
-        1.0f, -1.0f, 0.0f, 1.0f, 0.0f
+        -1.0f, -1.0f, 0.0f, 0.0f, 1.0f,
+        -1.0f,  1.0f, 0.0f, 0.0f, 0.0f,
+        1.0f,  1.0f, 0.0f, 1.0f, 0.0f,
+        1.0f, -1.0f, 0.0f, 1.0f, 1.0f
     };
 
     // Use shader program.

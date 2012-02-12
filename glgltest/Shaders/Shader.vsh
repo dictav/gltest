@@ -9,8 +9,11 @@
 attribute vec4 position;
 attribute vec2 texCoord;
 varying vec2 texCoordVarying;
+varying vec4 positionVarying;
+
 void main()
 {
 	gl_Position =  position;
 	texCoordVarying = texCoord;
+    positionVarying = position;
 }
