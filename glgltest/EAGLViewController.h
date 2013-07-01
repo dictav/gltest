@@ -13,14 +13,5 @@
 #import <OpenGLES/ES2/gl.h>
 #import <OpenGLES/ES2/glext.h>
 @interface EAGLViewController : UIViewController
-{
-    EAGLContext *context;
-    GLuint program;
-    
-	GLfloat *verticies;
-	GLushort *indicies;
-	GLuint textureId;	
-
-}
 
 @end

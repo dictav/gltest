@@ -40,7 +40,20 @@ enum {
     ATTRIB_TEXTURE_COORD,//ATTRIB_COLOR,
     NUM_ATTRIBUTES
 };
+
+// texture
+struct texture_params {
+    GLuint id;
+    CGSize size;
+};
+typedef struct texture_params Texture;
+
 @interface EAGLViewController ()
+{
+    GLuint myProgram;
+	Texture myTexture;
+}
+
 @property (nonatomic, retain) EAGLContext *context;
 @property (assign) IBOutlet EAGLView *glView;
 @property (assign) IBOutlet UIImageView *imageView;
@@ -50,15 +63,13 @@ enum {
 @interface EAGLViewController (GLMethods)
 - (void)setupGL;
 - (void)drawFrame;
-- (BOOL)loadShaders;
-- (BOOL)compileShader:(GLuint *)shader type:(GLenum)type file:(NSString *)file;
+- (void)loadTexture:(Texture*)texture image:(UIImage *)image;
+- (void)loadTexture:(Texture*)texture pixelBuffer:(CVPixelBufferRef)pixelBuffer;
+- (GLuint)createTextuerUsingSize:(CGSize)size;
+- (GLuint)createProgramWithShaderFiles:(NSArray*)filenames;
+- (GLuint)compileShaderWithContentsOfFile:(NSString*)file type:(GLenum)type;
 - (BOOL)linkProgram:(GLuint)prog;
 - (BOOL)validateProgram:(GLuint)prog;
-
-- (void)createTextuerUsingSize:(CGSize)size;
-- (void)loadTextureWithImage:(UIImage *)image;
-- (void)loadTextureWithPixelBuffer:(CVPixelBufferRef)pixelBuffer;
-- (void)createPlaneVerticiesAndIndicies;
 @end
 
 @implementation EAGLViewController
@@ -80,7 +91,7 @@ enum {
     
     UIImage *image = [UIImage imageNamed:@"noise_gazou.bmp"];
     self.imageView.image = image;
-    [self loadTextureWithImage:image];
+    [self loadTexture:&myTexture image:image];
     
 }
 
@@ -88,10 +99,10 @@ enum {
 {
 	[super viewDidUnload];
 	
-    if (program)
+    if (myProgram)
     {
-        glDeleteProgram(program);
-        program = 0;
+        glDeleteProgram(myProgram);
+        myProgram = 0;
     }
     
     // Tear down context.
@@ -110,10 +121,10 @@ enum {
 
 - (void)dealloc
 {
-    if (program)
+    if (myProgram)
     {
-        glDeleteProgram(program);
-        program = 0;
+        glDeleteProgram(myProgram);
+        myProgram = 0;
     }
     
     // Tear down context.
@@ -193,9 +204,9 @@ enum {
     // Validate program before drawing. This is a good check, but only really necessary in a debug build.
     // DEBUG macro must be defined in your debug configurations if that's not already the case.
 #if defined(DEBUG)
-    if (![self validateProgram:program])
+    if (![self validateProgram:myProgram])
     {
-        LOG(@"Failed to validate program: %d", program);
+        LOG(@"Failed to validate program: %d", myProgram);
         return;
     }
 #endif
@@ -214,16 +225,13 @@ enum {
 {
     EAGLContext *aContext = [[EAGLContext alloc] initWithAPI:kEAGLRenderingAPIOpenGLES2];
     NSAssert(aContext, @"Failed to create ES context");
-    UIImage *image=[UIImage new];
-    UIImage *image2 = [[UIImage alloc] initWithCGImage:image.CGImage scale:2.0 orientation:UIImageOrientationUp];
     self.context = aContext;
     [aContext release];
     
     [self.glView setContext:self.context];
     [self.glView setFramebuffer];
-    [self loadShaders];
-    [self createTextuerUsingSize:glView.framebufferSize];
-    [self createTextuerUsingSize:glView.framebufferSize];
+    NSArray *shaders = [NSArray arrayWithObjects:@"Shader.vsh", @"Shader.fsh", @"inverse.fsh", nil];
+    myProgram = [self createProgramWithShaderFiles:shaders];
     
 //    GLfloat const verticies_[] = {
 //        //x  ,   y  ,  z  ,  s  ,  t 
@@ -242,7 +250,7 @@ enum {
     };
 
     // Use shader program.
-    glUseProgram(program);
+    glUseProgram(myProgram);
 
     // Update uniform value.
     glUniform1i(uniforms[TEXTURE], 0);
@@ -264,7 +272,7 @@ enum {
    
 }
 
-- (BOOL)compileShader:(GLuint *)shader type:(GLenum)type file:(NSString *)file
+- (GLuint)compileShaderWithContentsOfFile:(NSString *)file type:(GLenum)type
 {
     GLint status;
     const GLchar *source;
@@ -272,34 +280,34 @@ enum {
     source = (GLchar *)[[NSString stringWithContentsOfFile:file encoding:NSUTF8StringEncoding error:nil] UTF8String];
     if (!source)
     {
-        LOG(@"Failed to load vertex shader");
+        LOG(@"Failed to load shader");
         return FALSE;
     }
     
-    *shader = glCreateShader(type);
-    glShaderSource(*shader, 1, &source, NULL);
-    glCompileShader(*shader);
+    GLuint shader = glCreateShader(type);
+    glShaderSource(shader, 1, &source, NULL);
+    glCompileShader(shader);
     
 #if defined(DEBUG)
     GLint logLength;
-    glGetShaderiv(*shader, GL_INFO_LOG_LENGTH, &logLength);
+    glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &logLength);
     if (logLength > 0)
     {
         GLchar *log = (GLchar *)malloc(logLength);
-        glGetShaderInfoLog(*shader, logLength, &logLength, log);
-        LOG(@"Shader compile log:\n%s", log);
+        glGetShaderInfoLog(shader, logLength, &logLength, log);
+        LOG(@"Shader compile log: %@\n%s", file, log);
         free(log);
     }
 #endif
     
-    glGetShaderiv(*shader, GL_COMPILE_STATUS, &status);
+    glGetShaderiv(shader, GL_COMPILE_STATUS, &status);
     if (status == 0)
     {
-        glDeleteShader(*shader);
+        glDeleteShader(shader);
         return FALSE;
     }
     
-    return TRUE;
+    return shader;
 }
 
 - (BOOL)linkProgram:(GLuint)prog
@@ -348,114 +356,116 @@ enum {
     return TRUE;
 }
 
-- (BOOL)loadShaders
+- (GLuint)createProgramWithShaderFiles:(NSArray*)filenames
 {
-    GLuint vertShader, fragShader;
-    NSString *vertShaderPathname, *fragShaderPathname;
+    NSMutableArray *shaders = [NSMutableArray array];
+    GLuint shader = 0;
+    BOOL isLinked = NO;
     
     // Create shader program.
-    program = glCreateProgram();
+    GLuint program = glCreateProgram();
+    NSAssert(program, @"Failed to create program");
     
-    // Create and compile vertex shader.
-    vertShaderPathname = [[NSBundle mainBundle] pathForResource:@"Shader" ofType:@"vsh"];
-    if (![self compileShader:&vertShader type:GL_VERTEX_SHADER file:vertShaderPathname])
-    {
-        LOG(@"Failed to compile vertex shader");
-        return FALSE;
-    }
-    
-    // Create and compile fragment shader.
-    fragShaderPathname = [[NSBundle mainBundle] pathForResource:@"Shader" ofType:@"fsh"];
-    if (![self compileShader:&fragShader type:GL_FRAGMENT_SHADER file:fragShaderPathname])
-    {
-        LOG(@"Failed to compile fragment shader");
-        return FALSE;
-    }
-    
-    // Attach vertex shader to program.
-    glAttachShader(program, vertShader);
-    
-    // Attach fragment shader to program.
-    glAttachShader(program, fragShader);
-    
-    // Bind attribute locations.
-    // This needs to be done prior to linking.
-    glBindAttribLocation(program, ATTRIB_VERTEX, "position");
-    glBindAttribLocation(program, ATTRIB_TEXTURE_COORD, "texCoord");//"color");
-    
-    // Link program.
-    if (![self linkProgram:program]){
-        LOG(@"Failed to link program: %d", program);
-        
-        if (vertShader) {
-            glDeleteShader(vertShader);
-            vertShader = 0;
+    for (NSString *file in filenames) {
+        // Preprocess
+        NSString *extension = [file pathExtension];
+        NSString *path = [[NSBundle mainBundle] pathForResource:file ofType:nil];
+        GLenum type;
+        if ([extension isEqualToString:@"vsh"]) {
+            type = GL_VERTEX_SHADER;
+        } else if ([extension isEqualToString:@"fsh"]) {
+            type = GL_FRAGMENT_SHADER;
+        } else {
+            LOG(@"File extension is failed. Shader extension must be 'vsh' or 'fsh': %@", file);
+            break;
         }
         
-        if (fragShader){
-            glDeleteShader(fragShader);
-            fragShader = 0;
-        }
-        
-        if (program){
-            glDeleteProgram(program);
-            program = 0;
-        }
-        
-        return FALSE;
-    }
-    
-    // Get uniform locations.
-    //uniforms[UNIFORM_TRANSLATE] = glGetUniformLocation(program, "translate");
-	uniforms[TEXTURE] = glGetUniformLocation(program, "texture");
+        // Load and compile program
+        shader = [self compileShaderWithContentsOfFile:path type:type];
 
+        if (shader) {
+            // Attach shader to program.
+            glAttachShader(program, shader);
+            [shaders addObject:[NSNumber numberWithUnsignedInt:shader]];
+        } else {
+            LOG(@"Failed to compile vertex shader: %@", file);
+            break;
+        }
+    }
+
+    // Link program if all files are compiled.
+    if (shaders.count == filenames.count) {
+        isLinked = [self linkProgram:program];
+        if (!isLinked) {
+            LOG(@"Failed to link program: %d", program);
+        }
+    } else {
+        LOG(@"Failed to compile shaders");
+    }
+
+    if (isLinked) {
+        // Bind attribute locations.
+        // This needs to be done prior to linking.
+        glBindAttribLocation(program, ATTRIB_VERTEX, "position");
+        glBindAttribLocation(program, ATTRIB_TEXTURE_COORD, "texCoord");
+        
+        
+        // Get uniform locations.
+        uniforms[TEXTURE] = glGetUniformLocation(program, "texture");
+    } else {
+        glDeleteProgram(program);
+        program = 0;
+    }
+        
     // Release vertex and fragment shaders.
-    if (vertShader)
-        glDeleteShader(vertShader);
-    if (fragShader)
-        glDeleteShader(fragShader);
-    
-    return TRUE;
+    for (NSNumber *num in shaders) {
+        glDeleteShader([num unsignedIntValue]);
+    }
+        
+    return program;    
 }
 
 #pragma mark -
--(void)createTextuerUsingSize:(CGSize)size
+-(GLuint)createTextuerUsingSize:(CGSize)size
 {
-    static CGSize textureSize;
-    if (CGSizeEqualToSize(textureSize, size)) {
-        return;
-    }
-
-    if (!textureId) {
-        glGenTextures(1, &textureId);
-        glBindTexture(GL_TEXTURE_2D, textureId);
-        
-        // S方向(横方向)で元のテクスチャ画像外の位置が指定されたときの処理方法
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        // T方向(縦方向)で元のテクスチャ画像外の位置が指定されたときの処理方法
-        //	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        // テクスチャ拡大時の補完方法を指定
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);       
-        // テクスチャ縮小時の補完方法を指定
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    }    
+    GLuint handle;
+    glGenTextures(1, &handle);
+    glBindTexture(GL_TEXTURE_2D, handle);
+    
+    // S方向(横方向)で元のテクスチャ画像外の位置が指定されたときの処理方法
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    // T方向(縦方向)で元のテクスチャ画像外の位置が指定されたときの処理方法
+    //	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    // テクスチャ拡大時の補完方法を指定
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);       
+    // テクスチャ縮小時の補完方法を指定
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     
 	int dataSize = size.width * size.height * 4;
 	uint8_t* textureData = (uint8_t*)malloc(dataSize);
     NSAssert(textureData != NULL, @"could not allocate texture data");
 	memset(textureData, 128, dataSize);
-    glBindTexture(GL_TEXTURE_2D, textureId);	
+    glBindTexture(GL_TEXTURE_2D, handle);	
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, size.width, size.height, 0, GL_BGRA_EXT, 
 				 GL_UNSIGNED_BYTE, textureData);
     
 
 	free(textureData);
+    
+    return handle;
 }
 
-- (void)loadTextureWithImage:(UIImage *)image
+- (void)loadTexture:(Texture*)texture image:(UIImage *)image
 {
-    [self createTextuerUsingSize:image.size];
+    if (!CGSizeEqualToSize(texture->size, image.size)) {
+        if (texture->id) {
+            glDeleteTextures(1, &texture->id);
+        }
+        texture->id = [self createTextuerUsingSize:image.size];
+        texture->size = image.size;
+    }
+    
     size_t width = image.size.width;
     size_t height = image.size.height;
     
@@ -469,58 +479,28 @@ enum {
 		CGColorSpaceRelease( colorSpace );
 		CGContextClearRect( cntx, CGRectMake( 0, 0, width, height ) );
 		CGContextDrawImage( cntx, CGRectMake( 0, 0, width, height ), image.CGImage);
-        NSAssert(textureId != 0, @"texute id was not generated");
-		glBindTexture(GL_TEXTURE_2D, textureId);
+        NSAssert(texture->id != 0, @"texute id was not generated");
+		glBindTexture(GL_TEXTURE_2D, texture->id);
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, imageData);
 	}
 	CGContextRelease(cntx);
 }
 
-- (void)loadTextureWithPixelBuffer:(CVPixelBufferRef)pixelBuffer
+- (void)loadTexture:(Texture*)texture pixelBuffer:(CVPixelBufferRef)pixelBuffer
 {
     CGSize bufferSize = CGSizeMake(640, 480);
-    [self createTextuerUsingSize:bufferSize];
+    if (!CGSizeEqualToSize(texture->size, bufferSize)) {
+        if (texture->id) {
+            glDeleteTextures(1, &texture->id);
+        }
+        texture->id = [self createTextuerUsingSize:bufferSize];
+        texture->size = bufferSize;
+    }
 
-    glBindTexture(GL_TEXTURE_2D, textureId);
+    glBindTexture(GL_TEXTURE_2D, texture->id);
     
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, bufferSize.width, bufferSize.height, GL_BGRA_EXT, GL_UNSIGNED_BYTE, pixelBuffer);
 
 }
 
-- (void)createPlaneVerticiesAndIndicies
-{
-	LOG(@"createPlane: col:%d, row:%d", PLANE_COL, PLANE_ROW);
-	verticies = (GLfloat*)malloc(NUM_VERTICIES * sizeof(GLfloat) * PLANE_ROW * PLANE_COL);
-	int i,j,k;
-	float y,u,v;
-	for(i=0; i < PLANE_ROW; i++){
-		v = (float)i/(float)(PLANE_ROW - 1);
-		y = 1.0 - 2.0*v;
-		for(j=0; j < PLANE_COL; j++){
-			k = (i * PLANE_COL + j) * NUM_VERTICIES;
-			u = (float)j/(float)(PLANE_COL - 1);
-			verticies[k+VERT_X] = 2.0*u - 1.0;        //x
-			verticies[k+VERT_Y] = y;    //y
-			verticies[k+VERT_Z] = 0.0f;  //z
-			verticies[k+TEX_X] = u;     //texture x
-			verticies[k+TEX_Y] = v;     //texture y
-		}
-	}
-	
-	int c=0, base, sign;
-	indicies = (GLushort*)malloc(sizeof(GLushort)*NUM_INDICIES);
-	for (j=0; j < PLANE_ROW - 1; j++) {
-		if(j%2 == 0){
-			base = j * PLANE_COL;
-			sign = 1;
-		}else{
-			base = (j + 1) * PLANE_COL - 1;
-			sign = -1;
-		}
-		for (i=0; i < PLANE_COL; i++) {
-			indicies[c++] = base + sign * i;
-			indicies[c++] = base + sign * i + PLANE_COL;
-		}
-	}
-}
 @end

@@ -8,7 +8,6 @@
 
 precision mediump float;
 varying vec2 texCoordVarying;
-varying vec4 positionVarying;
 uniform sampler2D texture;
 const vec2 dxy = vec2(0.0021, 0.0016);
 vec4 inverse(vec4 color);
@@ -121,8 +120,21 @@ vec4 smooth2(vec4 color)
     return vec4(col/sum, 1.0);
 }
 
+const vec3 kY = vec3(0.299, 0.587, 0.114);
+const vec3 kCr = vec3(0.5, -0.419, -0.081);
+const vec3 kCb = vec3(-0.169, -0.332, 0.5);
+vec4 brightness(vec4 color, float val) {
+    float Y = dot(kY, color.rgb) + val;
+    float Cr = dot(kCr, color.rgb);
+    float Cb = dot(kCb, color.rgb);
+    float R	= Y+1.402*Cr;
+    float G	= Y-0.714*Cr-0.344*Cb;
+    float B	= Y+1.772*Cb;
+    return vec4(R,G,B,color.a);
+}
+
 void main()
 {
     vec4 color = texture2D(texture, texCoordVarying);
-	gl_FragColor = smooth1(color);
+	gl_FragColor = smooth2(color);
 }
